@@ -162,7 +162,7 @@ class SenderPanel(tk.Frame):
         self._peer_listbox = tk.Listbox(
             peer_body, height=4, font=("Segoe UI", 10),
             relief="solid", bd=1, selectmode="single",
-            activestyle="dotbox"
+            activestyle="dotbox", exportselection=False
         )
         self._peer_listbox.pack(side="left", fill="x", expand=True)
 
@@ -234,15 +234,41 @@ class SenderPanel(tk.Frame):
 
     def _refresh_peers(self):
         peers = network.get_peers()
-        self._peer_map = {f"{host}  ({ip})": ip for ip, host in peers.items()}
+        new_peer_map = {f"{host}  ({ip})": ip for ip, host in peers.items()}
 
-        self._peer_listbox.delete(0, tk.END)
-        if self._peer_map:
-            self._no_peer_label.pack_forget()
-            for display in self._peer_map:
-                self._peer_listbox.insert(tk.END, display)
+        # Keep track of previously selected peer IP to restore selection
+        selected_ip = None
+        sel = self._peer_listbox.curselection()
+        if sel:
+            try:
+                selected_display = self._peer_listbox.get(sel[0])
+                selected_ip = self._peer_map.get(selected_display)
+            except Exception:
+                pass
+
+        if new_peer_map != self._peer_map:
+            self._peer_map = new_peer_map
+            self._peer_listbox.delete(0, tk.END)
+            if self._peer_map:
+                self._no_peer_label.pack_forget()
+                restore_index = None
+                for idx, display in enumerate(self._peer_map):
+                    self._peer_listbox.insert(tk.END, display)
+                    if self._peer_map[display] == selected_ip:
+                        restore_index = idx
+                if restore_index is not None:
+                    self._peer_listbox.selection_set(restore_index)
+                    self._peer_listbox.activate(restore_index)
+            else:
+                self._no_peer_label.pack(pady=4)
         else:
-            self._no_peer_label.pack(pady=4)
+            # Peers list is unchanged; ensure selection wasn't lost
+            if selected_ip is not None and not self._peer_listbox.curselection():
+                for idx, display in enumerate(self._peer_map):
+                    if self._peer_map[display] == selected_ip:
+                        self._peer_listbox.selection_set(idx)
+                        self._peer_listbox.activate(idx)
+                        break
 
         self.after(2000, self._refresh_peers)
 
