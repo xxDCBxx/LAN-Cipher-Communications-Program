@@ -49,7 +49,7 @@ def decode(ciphertext: str, steps: list) -> tuple:
         return False, ""
 
     text = ciphertext
-    for step in reversed(steps):
+    for step in steps:
         try:
             text = _apply_cipher(text, step, "decrypt")
         except Exception:
@@ -111,7 +111,7 @@ if __name__ == "__main__":
         {"cipher": "double_transposition", "key1": "ZEBRA", "key2": "LEMON"},
     ]
     ct = encode(plaintext, steps)
-    ok, pt = decode(ct, steps)
+    ok, pt = decode(ct, list(reversed(steps)))
     status = "PASS" if ok and pt == plaintext else "FAIL"
     if status == "FAIL": all_passed = False
     print(f"  [{status}] Ciphertext: {ct!r}")
@@ -126,7 +126,7 @@ if __name__ == "__main__":
         {"cipher": "affine", "a": 11, "b": 14},
     ]
     ct = encode(plaintext, steps)
-    ok, pt = decode(ct, steps)
+    ok, pt = decode(ct, list(reversed(steps)))
     status = "PASS" if ok and pt == plaintext else "FAIL"
     if status == "FAIL": all_passed = False
     print(f"  [{status}] Recovered: {pt!r}")
@@ -147,9 +147,10 @@ if __name__ == "__main__":
         {"cipher": "vigenere", "key": "HELLO"},
         {"cipher": "affine", "a": 5, "b": 8},
     ]
+    # Wrong order: entering same order as encryption instead of reverse order
     steps_dec_wrong_order = [
-        {"cipher": "affine", "a": 5, "b": 8},
         {"cipher": "vigenere", "key": "HELLO"},
+        {"cipher": "affine", "a": 5, "b": 8},
     ]
     ct = encode("Order matters", steps_enc)
     ok, pt = decode(ct, steps_dec_wrong_order)
