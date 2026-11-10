@@ -20,6 +20,7 @@ class CipherRow(tk.Frame):
         self._on_change = on_change
         self._show_states: dict[str, bool] = {}
         self._key_widgets: list[tuple] = []
+        self._entries: dict[str, tk.Entry] = {}
 
         tk.Label(self, text=f"Step {row_number}:", font=("Segoe UI", 10, "bold"),
                  bg=CARD_BG, fg=LABEL_FG, width=7, anchor="e").pack(side="left", padx=(0, 6))
@@ -39,20 +40,26 @@ class CipherRow(tk.Frame):
     def get_cipher_name(self) -> str:
         return self._cipher_var.get()
 
+    def _entry_value(self, name: str) -> str:
+        entry = self._entries.get(name)
+        return entry.get() if entry is not None else ""
+
     def get_step(self) -> dict | None:
         name = self._cipher_var.get()
         if name == CIPHER_OPTIONS[0]:
             return None
 
         if name == "Vigenère":
-            key = self._entries.get("vig_key", tk.Entry(self)).get().strip()
+            key = self._entry_value("vig_key").strip()
             if not key:
                 raise ValueError("Vigenère: key cannot be empty.")
+            if not any(c.isascii() and c.isalpha() for c in key):
+                raise ValueError("Vigenère: key must contain at least one letter (A–Z).")
             return {"cipher": "vigenere", "key": key}
 
         elif name == "Affine":
-            a_str = self._entries.get("aff_a", tk.Entry(self)).get().strip()
-            b_str = self._entries.get("aff_b", tk.Entry(self)).get().strip()
+            a_str = self._entry_value("aff_a").strip()
+            b_str = self._entry_value("aff_b").strip()
             if not a_str or not b_str:
                 raise ValueError("Affine: both 'a' and 'b' values are required.")
             try:
@@ -69,14 +76,14 @@ class CipherRow(tk.Frame):
             return {"cipher": "affine", "a": a, "b": b}
 
         elif name == "Vernam":
-            key = self._entries.get("ver_key", tk.Entry(self)).get()
+            key = self._entry_value("ver_key")
             if not key:
                 raise ValueError("Vernam: key cannot be empty.")
             return {"cipher": "vernam", "key": key}
 
         elif name == "Double Transposition":
-            k1 = self._entries.get("dt_key1", tk.Entry(self)).get().strip()
-            k2 = self._entries.get("dt_key2", tk.Entry(self)).get().strip()
+            k1 = self._entry_value("dt_key1").strip()
+            k2 = self._entry_value("dt_key2").strip()
             if not k1 or not k2:
                 raise ValueError("Double Transposition: both Key 1 and Key 2 are required.")
             return {"cipher": "double_transposition", "key1": k1, "key2": k2}
@@ -149,6 +156,7 @@ class SenderPanel(tk.Frame):
         super().__init__(parent, bg=BG, **kwargs)
         self._log = log_callback or (lambda m: None)
         self._peer_map: dict[str, str] = {}  # display_name → ip
+        self._refresh_job = None
         self._build_ui()
         self._refresh_peers()
 
@@ -280,6 +288,9 @@ class SenderPanel(tk.Frame):
         ).pack(pady=(8, 16))
 
     def _refresh_peers(self):
+        if self._refresh_job is not None:
+            self.after_cancel(self._refresh_job)
+            self._refresh_job = None
         peers = network.get_peers()
         new_peer_map = {f"{host}  ({ip})": ip for ip, host in peers.items()}
 
@@ -317,7 +328,12 @@ class SenderPanel(tk.Frame):
                         self._peer_listbox.activate(idx)
                         break
 
-        self.after(2000, self._refresh_peers)
+        if not self._peer_map and not self._no_peer_label.winfo_manager():
+            self._no_peer_label.pack(pady=4)
+        elif self._peer_map and self._no_peer_label.winfo_manager():
+            self._no_peer_label.pack_forget()
+
+        self._refresh_job = self.after(2000, self._refresh_peers)
 
     def _send(self):
         self._error_label.config(text="")
@@ -369,6 +385,13 @@ class SenderPanel(tk.Frame):
         try:
             ciphertext = encrypt_order.encode(plaintext, steps)
             verifier = encrypt_order.make_verifier(plaintext, steps)
+            payload = ciphertext.encode("utf-8")
+        except UnicodeEncodeError:
+            self._error_label.config(
+                text="Encryption error: the ciphertext contains characters that "
+                     "cannot be transmitted. Use an ASCII Vernam key."
+            )
+            return
         except Exception as e:
             self._error_label.config(text=f"Encryption error: {e}")
             return
@@ -378,7 +401,7 @@ class SenderPanel(tk.Frame):
                 local_ip = network.get_local_ip()
                 network.send_message(
                     target_ip,
-                    ciphertext.encode("utf-8"),
+                    payload,
                     decoy,
                     local_ip,
                     bailout_password,
@@ -392,10 +415,9 @@ class SenderPanel(tk.Frame):
                     f" | Bailout: {'set' if bailout_password else 'none'}"
                 )
                 self.after(0, self._clear_fields)
-            except (ConnectionRefusedError, TimeoutError, RuntimeError) as e:
-                self.after(0, lambda: self._error_label.config(
-                    text=f"Send failed: {e}"
-                ))
+            except Exception as e:
+                message = f"Send failed: {e}"
+                self.after(0, lambda: self._error_label.config(text=message))
 
         threading.Thread(target=_do_send, daemon=True).start()
 

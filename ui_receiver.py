@@ -228,15 +228,19 @@ class ReceiverPanel(tk.Frame):
             )
             return
 
+        current_len = len(self._ciphertext)
         for step in steps:
-            if step.get("cipher") == "vernam":
+            name = step.get("cipher")
+            if name == "vernam":
                 key = step.get("key", "")
-                if len(key) < len(self._ciphertext):
+                if len(key) < current_len:
                     self._feedback_label.config(
                         text=f"Vernam key too short: key length ({len(key)}) "
-                             f"must be ≥ ciphertext length ({len(self._ciphertext)})."
+                             f"must be ≥ text length at this step ({current_len})."
                     )
                     return
+            elif name == "double_transposition":
+                current_len = max(current_len - 4, 0)
 
         try:
             success, text = encrypt_order.decode(self._ciphertext, steps, self._verifier)

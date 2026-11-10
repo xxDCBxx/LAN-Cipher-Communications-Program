@@ -21,7 +21,7 @@ def encrypt(plaintext: str, a: int, b: int) -> str:
     b = b % 26
     result = []
     for char in plaintext:
-        if char.isalpha():
+        if char.isascii() and char.isalpha():
             x = ord(char.upper()) - ord('A')
             encrypted_x = (a * x + b) % 26
             encrypted_char = chr(encrypted_x + ord('A'))
@@ -39,7 +39,7 @@ def decrypt(ciphertext: str, a: int, b: int) -> str:
     a_inv = _mod_inverse(a, 26)
     result = []
     for char in ciphertext:
-        if char.isalpha():
+        if char.isascii() and char.isalpha():
             y = ord(char.upper()) - ord('A')
             decrypted_x = (a_inv * (y - b)) % 26
             decrypted_char = chr(decrypted_x + ord('A'))
