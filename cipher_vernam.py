@@ -1,6 +1,4 @@
 def encrypt(plaintext: str, key: str) -> str:
-    if not key:
-        raise ValueError("Vernam key cannot be empty.")
     if len(key) < len(plaintext):
         raise ValueError(
             f"Vernam key is too short. "
@@ -8,13 +6,11 @@ def encrypt(plaintext: str, key: str) -> str:
         )
     result = []
     for i, char in enumerate(plaintext):
-        result.append(chr(ord(char) ^ ord(key[i % len(key)])))
+        result.append(chr(ord(char) ^ ord(key[i])))
     return "".join(result)
 
 
 def decrypt(ciphertext: str, key: str) -> str:
-    if not key:
-        raise ValueError("Vernam key cannot be empty.")
     if len(key) < len(ciphertext):
         raise ValueError(
             f"Vernam key is too short. "
@@ -22,7 +18,7 @@ def decrypt(ciphertext: str, key: str) -> str:
         )
     result = []
     for i, char in enumerate(ciphertext):
-        result.append(chr(ord(char) ^ ord(key[i % len(key)])))
+        result.append(chr(ord(char) ^ ord(key[i])))
     return "".join(result)
 
 
