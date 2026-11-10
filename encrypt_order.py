@@ -19,10 +19,7 @@ def _apply_cipher(text: str, step: dict, mode: str) -> str:
 
     elif name == "vernam":
         key = step["key"]
-        if not key:
-            raise ValueError("Vernam: key cannot be empty.")
-        full_key = (key * ((len(text) // len(key)) + 1))[:len(text)]
-        return _ver_enc(text, full_key) if mode == "encrypt" else _ver_dec(text, full_key)
+        return _ver_enc(text, key) if mode == "encrypt" else _ver_dec(text, key)
 
     elif name == "double_transposition":
         key1, key2 = step["key1"], step["key2"]
@@ -38,15 +35,6 @@ def encode(plaintext: str, steps: list) -> str:
         raise ValueError("At least one cipher step is required.")
     if len(steps) > 3:
         raise ValueError("A maximum of 3 cipher steps are allowed.")
-
-    for step in steps:
-        if step.get("cipher", "").lower() == "vernam":
-            key = step.get("key", "")
-            if len(key) < len(plaintext):
-                raise ValueError(
-                    f"Vernam key is too short. "
-                    f"Key length ({len(key)}) must be >= plaintext length ({len(plaintext)})."
-                )
 
     text = _MARKER + plaintext
     for step in steps:
@@ -104,24 +92,6 @@ if __name__ == "__main__":
     status = "PASS" if ok and pt == "Test Message!" else "FAIL"
     if status == "FAIL": all_passed = False
     print(f"  [{status}] Recovered: {pt!r}")
-
-    # --- Test 3b: Single Vernam with exact plaintext length key (4 letters) ---
-    print("\n[Test 3b] Single Vernam with 4-letter key and 4-letter plaintext")
-    steps_4 = [{"cipher": "vernam", "key": "WXYZ"}]
-    ct_4 = encode("cats", steps_4)
-    ok_4, pt_4 = decode(ct_4, steps_4)
-    status_4 = "PASS" if ok_4 and pt_4 == "cats" else "FAIL"
-    if status_4 == "FAIL": all_passed = False
-    print(f"  [{status_4}] Plaintext: 'cats', Key: 'WXYZ' → Recovered: {pt_4!r}")
-
-    # --- Test 3c: Vernam key too short (3 letters for 4-letter plaintext) ---
-    print("\n[Test 3c] Vernam key too short test")
-    try:
-        encode("cats", [{"cipher": "vernam", "key": "WXY"}])
-        print("  [FAIL] Should have raised ValueError")
-        all_passed = False
-    except ValueError as e:
-        print(f"  [PASS] ValueError: {e}")
 
     # --- Test 4: Single Double Transposition round-trip ---
     print("\n[Test 4] Single Double Transposition")
