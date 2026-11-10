@@ -19,7 +19,7 @@ class CipherRow(tk.Frame):
         super().__init__(parent, bg=CARD_BG, **kwargs)
         self._on_change = on_change
         self._show_states: dict[str, bool] = {}
-        self._key_widgets: list[tuple] = [] 
+        self._key_widgets: list[tuple] = []
 
         tk.Label(self, text=f"Step {row_number}:", font=("Segoe UI", 10, "bold"),
                  bg=CARD_BG, fg=LABEL_FG, width=7, anchor="e").pack(side="left", padx=(0, 6))
@@ -194,14 +194,62 @@ class SenderPanel(tk.Frame):
                                   relief="solid", bd=1, wrap="word")
         self._plaintext.pack(fill="x", pady=(2, 10))
 
-        tk.Label(msg_body, text="Decoy text (shown if wrong decryption key used twice):",
+        tk.Label(msg_body, text="Decoy text (shown to an intruder who gets locked out):",
                  font=("Segoe UI", 10, "bold"), bg=CARD_BG, fg=LABEL_FG).pack(anchor="w")
         tk.Label(msg_body,
                  text="This will be displayed to an unauthorized user as if it were the real message.",
                  font=("Segoe UI", 9), bg=CARD_BG, fg="#888").pack(anchor="w")
         self._decoy = tk.Text(msg_body, height=3, font=("Segoe UI", 11),
                               relief="solid", bd=1, wrap="word")
-        self._decoy.pack(fill="x", pady=(2, 0))
+        self._decoy.pack(fill="x", pady=(2, 10))
+
+        tk.Label(msg_body, text="Bailout Password (emergency override):",
+                 font=("Segoe UI", 10, "bold"), bg=CARD_BG, fg=LABEL_FG).pack(anchor="w")
+        tk.Label(msg_body,
+                 text="Optional. Tell the intended recipient out-of-band; it lifts the lockdown.",
+                 font=("Segoe UI", 9), bg=CARD_BG, fg="#888").pack(anchor="w")
+
+        bail_grid = tk.Frame(msg_body, bg=CARD_BG)
+        bail_grid.pack(fill="x", pady=(4, 0))
+        bail_grid.columnconfigure(1, weight=1)
+
+        def _make_pw_row(row: int, label: str):
+            tk.Label(bail_grid, text=label, font=("Segoe UI", 9),
+                     bg=CARD_BG, fg=LABEL_FG, anchor="w", width=9
+                     ).grid(row=row, column=0, sticky="w", pady=2)
+            entry = tk.Entry(bail_grid, font=("Courier", 11), show="•",
+                             relief="solid", bd=1)
+            entry.grid(row=row, column=1, sticky="ew", pady=2)
+
+            def toggle(e=entry):
+                e.config(show="" if e.cget("show") else "•")
+
+            tk.Button(bail_grid, text="👁", font=("Segoe UI", 9), relief="flat",
+                      bg=CARD_BG, cursor="hand2", command=toggle
+                      ).grid(row=row, column=2, padx=(6, 0), pady=2)
+            return entry
+
+        self._bailout_entry = _make_pw_row(0, "Password:")
+        self._bailout_confirm_entry = _make_pw_row(1, "Confirm:")
+
+        self._bailout_match_label = tk.Label(
+            bail_grid, text="", font=("Segoe UI", 9), bg=CARD_BG, fg="#888",
+            anchor="w"
+        )
+        self._bailout_match_label.grid(row=2, column=1, sticky="w")
+
+        def _update_match(_event=None):
+            pw = self._bailout_entry.get()
+            cf = self._bailout_confirm_entry.get()
+            if not pw and not cf:
+                self._bailout_match_label.config(text="")
+            elif pw == cf:
+                self._bailout_match_label.config(text="✔ Passwords match", fg="#2e7d32")
+            else:
+                self._bailout_match_label.config(text="✗ Passwords do not match", fg=ERR_FG)
+
+        self._bailout_entry.bind("<KeyRelease>", _update_match)
+        self._bailout_confirm_entry.bind("<KeyRelease>", _update_match)
 
         cipher_card = self._card(self, "3. Encryption Order (up to 3 steps, order matters)")
         cipher_card.pack(fill="x", padx=16, pady=6)
@@ -230,7 +278,6 @@ class SenderPanel(tk.Frame):
             padx=24, pady=10, cursor="hand2",
             command=self._send
         ).pack(pady=(8, 16))
-
 
     def _refresh_peers(self):
         peers = network.get_peers()
@@ -272,7 +319,6 @@ class SenderPanel(tk.Frame):
 
         self.after(2000, self._refresh_peers)
 
-
     def _send(self):
         self._error_label.config(text="")
 
@@ -296,6 +342,16 @@ class SenderPanel(tk.Frame):
             self._error_label.config(text="Decoy text cannot be empty.")
             return
 
+        bailout_password = self._bailout_entry.get()
+        bailout_confirm = self._bailout_confirm_entry.get()
+
+        if bailout_password != bailout_confirm:
+            self._error_label.config(
+                text="Bailout passwords do not match. Re-enter both fields "
+                     "(or clear both to send without a bailout password)."
+            )
+            return
+
         steps = []
         for row in self._cipher_rows:
             try:
@@ -312,6 +368,7 @@ class SenderPanel(tk.Frame):
 
         try:
             ciphertext = encrypt_order.encode(plaintext, steps)
+            verifier = encrypt_order.make_verifier(plaintext, steps)
         except Exception as e:
             self._error_label.config(text=f"Encryption error: {e}")
             return
@@ -324,12 +381,15 @@ class SenderPanel(tk.Frame):
                     ciphertext.encode("utf-8"),
                     decoy,
                     local_ip,
+                    bailout_password,
+                    verifier,
                 )
                 cipher_names = ", ".join(
                     s["cipher"].replace("_", " ").title() for s in steps
                 )
                 self._log(
                     f"Sent to {display_name} | Ciphers: {cipher_names}"
+                    f" | Bailout: {'set' if bailout_password else 'none'}"
                 )
                 self.after(0, self._clear_fields)
             except (ConnectionRefusedError, TimeoutError, RuntimeError) as e:
@@ -342,6 +402,9 @@ class SenderPanel(tk.Frame):
     def _clear_fields(self):
         self._plaintext.delete("1.0", tk.END)
         self._decoy.delete("1.0", tk.END)
+        self._bailout_entry.delete(0, tk.END)
+        self._bailout_confirm_entry.delete(0, tk.END)
+        self._bailout_match_label.config(text="")
         for row in self._cipher_rows:
             row.clear()
         self._error_label.config(text="")
