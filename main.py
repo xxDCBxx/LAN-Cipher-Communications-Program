@@ -220,7 +220,6 @@ class App(tk.Tk):
             cursor="hand2", command=self._clear_log
         ).pack(anchor="e", padx=4, pady=(0, 4))
 
-
     def _start_network(self):
         network.on_message_received(self._on_message_received)
         network.on_notification_received(self._on_notification_received)
@@ -232,20 +231,23 @@ class App(tk.Tk):
         self._log(f"Network started — Your IP: {ip} | Hostname: {socket.gethostname()}")
 
     def _on_message_received(self, peer_ip: str, ct_bytes: bytes,
-                              decoy: str, sender_ip: str):
+                              decoy: str, sender_ip: str,
+                              bailout_record: dict | None = None,
+                              verifier: dict | None = None):
         ciphertext = ct_bytes.decode("utf-8")
 
         def _handle():
             self._log(f"Message received from {sender_ip}")
-            self._notebook.select(1)  
-            self._receiver_panel.load_message(ciphertext, decoy, sender_ip)
+            self._notebook.select(1)
+            self._receiver_panel.load_message(
+                ciphertext, decoy, sender_ip, bailout_record, verifier
+            )
 
         self.after(0, _handle)
 
     def _on_notification_received(self, event: str, sender_ip: str):
         self.after(0, lambda: notifications.dispatch_notification(event, sender_ip))
         self.after(0, lambda: self._log(f"Notification received: '{event}' from {sender_ip}"))
-
 
     def _log(self, message: str):
         def _append():
@@ -277,7 +279,6 @@ class App(tk.Tk):
         text.pack(fill="both", expand=True)
         text.insert("1.0", HOW_TO_USE)
         text.config(state="disabled")
-
 
     def on_close(self):
         network.stop()
