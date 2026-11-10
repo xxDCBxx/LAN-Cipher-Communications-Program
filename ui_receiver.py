@@ -5,8 +5,8 @@ import threading
 import network
 import encrypt_order
 import notifications
-from ui_honeypot import HoneypotController
-from ui_sender import CipherRow, MAX_STEPS  
+from ui_honeypot import LockdownController
+from ui_sender import CipherRow, MAX_STEPS
 
 ACCENT   = "#1565C0"
 BG       = "#f5f7fa"
@@ -14,6 +14,8 @@ CARD_BG  = "#ffffff"
 ERR_FG   = "#c62828"
 OK_FG    = "#2e7d32"
 LABEL_FG = "#37474f"
+
+LOCKDOWN_THRESHOLD = 2
 
 
 class ReceiverPanel(tk.Frame):
@@ -24,17 +26,25 @@ class ReceiverPanel(tk.Frame):
         self._ciphertext: str = ""
         self._decoy_text: str = ""
         self._sender_ip: str = ""
+        self._bailout_record: dict | None = None
+        self._verifier: dict | None = None
         self._fail_count: int = 0
-        self._honeypot: HoneypotController | None = None
+        self._bailout_used: bool = False
+        self._lockdown: LockdownController | None = None
 
         self._build_waiting_state()
 
-    def load_message(self, ciphertext: str, decoy_text: str, sender_ip: str):
+    def load_message(self, ciphertext: str, decoy_text: str, sender_ip: str,
+                     bailout_record: dict | None = None,
+                     verifier: dict | None = None):
         self._ciphertext = ciphertext
         self._decoy_text = decoy_text
         self._sender_ip = sender_ip
+        self._bailout_record = bailout_record
+        self._verifier = verifier
         self._fail_count = 0
-        self._honeypot = None
+        self._bailout_used = False
+        self._lockdown = None
         self._build_received_state()
 
     def _clear_all(self):
@@ -136,22 +146,40 @@ class ReceiverPanel(tk.Frame):
             command=self._build_waiting_state
         ).pack(pady=(0, 20))
 
-    def _build_honeypot_state(self):
+    def _build_lockdown_state(self):
         self._clear_all()
 
         container = tk.Frame(self, bg=BG)
         container.pack(fill="both", expand=True)
 
-        self._honeypot = HoneypotController(
+        self._lockdown = LockdownController(
             container,
             decoy_text=self._decoy_text,
-            on_complete=self._honeypot_finished,
+            bailout_record=None if self._bailout_used else self._bailout_record,
+            on_bailout=self._on_bailout_unlock,
+            on_decoy=self._lockdown_decoy_reveal,
         )
-        self._honeypot.start()
-        self._log("Honeypot activated for incoming message.")
+        self._lockdown.start()
+        self._log("Lockdown activated for incoming message.")
 
-    def _honeypot_finished(self, decoy_text: str):
+    def _on_bailout_unlock(self):
+        self._fail_count = 0
+        self._bailout_used = True
+        self._lockdown = None
+        self._log(
+            f"Bailout password accepted for message from {self._sender_ip}; "
+            f"{LOCKDOWN_THRESHOLD} more decryption attempts granted."
+        )
+        self._build_received_state()
+        self._feedback_label.config(
+            text=f"✔ Bailout accepted. You have {LOCKDOWN_THRESHOLD} more attempts "
+                 f"to enter the decryption sequence.",
+            fg=OK_FG,
+        )
+
+    def _lockdown_decoy_reveal(self, decoy_text: str):
         self._clear_all()
+        self._lockdown = None
 
         tk.Label(self, text="✅", font=("Segoe UI", 36), bg=BG).pack(pady=(40, 4))
         tk.Label(
@@ -168,7 +196,7 @@ class ReceiverPanel(tk.Frame):
         result_text = tk.Text(
             result_body, height=6, font=("Segoe UI", 12),
             relief="solid", bd=1, wrap="word",
-            state="normal", bg="#fff9c4" 
+            state="normal", bg="#fff9c4"
         )
         result_text.insert("1.0", decoy_text)
         result_text.config(state="disabled")
@@ -181,9 +209,8 @@ class ReceiverPanel(tk.Frame):
             command=self._build_waiting_state
         ).pack(pady=(0, 20))
 
-
     def _attempt_decrypt(self):
-        self._feedback_label.config(text="")
+        self._feedback_label.config(text="", fg=ERR_FG)
 
         steps = []
         for row in self._cipher_rows:
@@ -212,7 +239,7 @@ class ReceiverPanel(tk.Frame):
                     return
 
         try:
-            success, text = encrypt_order.decode(self._ciphertext, steps)
+            success, text = encrypt_order.decode(self._ciphertext, steps, self._verifier)
         except Exception as e:
             success, text = False, str(e)
 
@@ -226,15 +253,14 @@ class ReceiverPanel(tk.Frame):
                 f"from {self._sender_ip}."
             )
 
-            if self._fail_count == 1:
+            if self._fail_count < LOCKDOWN_THRESHOLD:
                 self._feedback_label.config(
                     text="✗  Incorrect — please try again."
                 )
                 self._notify_sender("fail_once")
-
             else:
                 self._notify_sender("unauthorized")
-                self._build_honeypot_state()
+                self._build_lockdown_state()
 
     def _notify_sender(self, event: str):
         if not self._sender_ip:
