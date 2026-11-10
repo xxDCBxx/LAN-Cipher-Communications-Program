@@ -158,10 +158,6 @@ class App(tk.Tk):
         )
         self._sender_panel.pack(fill="both", expand=True)
 
-        def _on_mousewheel_send(event):
-            scroll_send.yview_scroll(int(-1 * (event.delta / 120)), "units")
-        scroll_send.bind_all("<MouseWheel>", _on_mousewheel_send)
-
         self._receive_frame = tk.Frame(self._notebook, bg=BG)
         self._notebook.add(self._receive_frame, text="  📬  Receive  ")
 
@@ -189,6 +185,18 @@ class App(tk.Tk):
             self._receiver_inner, log_callback=self._log
         )
         self._receiver_panel.pack(fill="both", expand=True)
+
+        def _on_mousewheel(event):
+            if not event.delta:
+                return
+            try:
+                if event.widget.winfo_toplevel() is not self:
+                    return
+            except (AttributeError, KeyError, tk.TclError):
+                return
+            canvas = scroll_send if self._notebook.index("current") == 0 else scroll_recv
+            canvas.yview_scroll(-1 if event.delta > 0 else 1, "units")
+        self.bind_all("<MouseWheel>", _on_mousewheel)
 
         log_frame = tk.LabelFrame(
             self,

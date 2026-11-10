@@ -26,6 +26,7 @@ _threads: list = []
 
 BAILOUT_ITERATIONS = 200_000
 _MAX_ACCEPTED_ITERATIONS = 1_000_000
+MAX_PACKET_BYTES = 4 * 1024 * 1024
 
 
 def make_bailout_record(password: str) -> dict | None:
@@ -233,10 +234,14 @@ def _handle_tcp_connection(conn: socket.socket, peer_ip: str) -> None:
     try:
         conn.settimeout(10.0)
         chunks = []
+        total = 0
         while True:
             chunk = conn.recv(4096)
             if not chunk:
                 break
+            total += len(chunk)
+            if total > MAX_PACKET_BYTES:
+                return
             chunks.append(chunk)
         raw = b"".join(chunks)
         pkt = json.loads(raw.decode("utf-8"))
@@ -245,7 +250,7 @@ def _handle_tcp_connection(conn: socket.socket, peer_ip: str) -> None:
         if pkt_type == "message" and _on_message_cb:
             payload_bytes = base64.b64decode(pkt["payload"])
             decoy = pkt.get("decoy", "")
-            sender_ip = pkt.get("sender_ip", peer_ip)
+            sender_ip = peer_ip
             bailout_record = pkt.get("bailout")
             if not isinstance(bailout_record, dict):
                 bailout_record = None
@@ -257,7 +262,7 @@ def _handle_tcp_connection(conn: socket.socket, peer_ip: str) -> None:
 
         elif pkt_type == "notification" and _on_notification_cb:
             event = pkt.get("event", "")
-            sender_ip = pkt.get("sender_ip", peer_ip)
+            sender_ip = peer_ip
             _on_notification_cb(event, sender_ip)
 
     except Exception as e:
@@ -268,18 +273,19 @@ def _handle_tcp_connection(conn: socket.socket, peer_ip: str) -> None:
 
 def _tcp_send(ip: str, packet: dict) -> None:
     raw = json.dumps(packet).encode("utf-8")
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(5.0)
         sock.connect((ip, TCP_PORT))
         sock.sendall(raw)
-        sock.close()
     except ConnectionRefusedError:
         raise ConnectionRefusedError(f"Peer {ip} refused the connection (port {TCP_PORT}).")
     except socket.timeout:
         raise TimeoutError(f"Connection to {ip} timed out.")
     except Exception as e:
         raise RuntimeError(f"Failed to send to {ip}: {e}")
+    finally:
+        sock.close()
 
 
 if __name__ == "__main__":

@@ -1,5 +1,5 @@
 def _clean_key(key: str) -> str:
-    cleaned = "".join(c for c in key if c.isalpha()).upper()
+    cleaned = "".join(c for c in key if c.isascii() and c.isalpha()).upper()
     if not cleaned:
         raise ValueError("Vigenère key must contain at least one alphabetic character.")
     return cleaned
@@ -10,7 +10,7 @@ def encrypt(plaintext: str, key: str) -> str:
     result = []
     key_index = 0
     for char in plaintext:
-        if char.isalpha():
+        if char.isascii() and char.isalpha():
             shift = ord(key[key_index % len(key)]) - ord('A')
             if char.isupper():
                 encrypted_char = chr((ord(char) - ord('A') + shift) % 26 + ord('A'))
@@ -28,7 +28,7 @@ def decrypt(ciphertext: str, key: str) -> str:
     result = []
     key_index = 0
     for char in ciphertext:
-        if char.isalpha():
+        if char.isascii() and char.isalpha():
             shift = ord(key[key_index % len(key)]) - ord('A')
             if char.isupper():
                 decrypted_char = chr((ord(char) - ord('A') - shift) % 26 + ord('A'))

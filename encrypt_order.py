@@ -18,9 +18,9 @@ def _canonical_steps(steps: list) -> list:
     for s in steps:
         name = s.get("cipher", "").lower()
         if name == "vigenere":
-            out.append([name, "".join(c for c in str(s["key"]) if c.isalpha()).upper()])
+            out.append([name, "".join(c for c in str(s["key"]) if c.isascii() and c.isalpha()).upper()])
         elif name == "affine":
-            out.append([name, int(s["a"]), int(s["b"]) % 26])
+            out.append([name, int(s["a"]) % 26, int(s["b"]) % 26])
         elif name == "vernam":
             out.append([name, str(s["key"])])
         elif name == "double_transposition":
