@@ -1,6 +1,10 @@
 import socket
 import json
 import base64
+import hashlib
+import hmac
+import inspect
+import os
 import threading
 import time
 import logging
@@ -12,13 +16,47 @@ TCP_PORT = 50001
 
 _peers: dict = {}
 _peers_lock = threading.Lock()
-PEER_TIMEOUT = 10  
+PEER_TIMEOUT = 10
 
 _on_message_cb = None
 _on_notification_cb = None
 
 _running = False
 _threads: list = []
+
+BAILOUT_ITERATIONS = 200_000
+_MAX_ACCEPTED_ITERATIONS = 1_000_000
+
+
+def make_bailout_record(password: str) -> dict | None:
+    if not password:
+        return None
+    salt = os.urandom(16)
+    digest = hashlib.pbkdf2_hmac(
+        "sha256", password.encode("utf-8"), salt, BAILOUT_ITERATIONS
+    )
+    return {
+        "salt": base64.b64encode(salt).decode("ascii"),
+        "hash": base64.b64encode(digest).decode("ascii"),
+        "iters": BAILOUT_ITERATIONS,
+    }
+
+
+def verify_bailout(candidate: str, record: dict | None) -> bool:
+    if not record or not candidate:
+        return False
+    try:
+        salt = base64.b64decode(record["salt"])
+        expected = base64.b64decode(record["hash"])
+        iters = int(record["iters"])
+        if not (1 <= iters <= _MAX_ACCEPTED_ITERATIONS):
+            return False
+        actual = hashlib.pbkdf2_hmac(
+            "sha256", candidate.encode("utf-8"), salt, iters
+        )
+        return hmac.compare_digest(actual, expected)
+    except Exception:
+        return False
 
 
 def on_message_received(callback):
@@ -41,13 +79,20 @@ def get_peers() -> dict:
         }
 
 
-def send_message(ip: str, ciphertext_bytes: bytes, decoy_text: str, sender_ip: str) -> None:
+def send_message(ip: str, ciphertext_bytes: bytes, decoy_text: str,
+                 sender_ip: str, bailout_password: str = "",
+                 verifier: dict | None = None) -> None:
     packet = {
         "type": "message",
         "payload": base64.b64encode(ciphertext_bytes).decode("utf-8"),
         "decoy": decoy_text,
         "sender_ip": sender_ip,
     }
+    record = make_bailout_record(bailout_password)
+    if record is not None:
+        packet["bailout"] = record
+    if verifier is not None:
+        packet["verifier"] = verifier
     _tcp_send(ip, packet)
 
 
@@ -89,7 +134,6 @@ def start() -> None:
 def stop() -> None:
     global _running
     _running = False
-
 
 
 def _build_beacon() -> bytes:
@@ -171,6 +215,20 @@ def _tcp_listen_loop() -> None:
         srv.close()
 
 
+def _invoke_message_cb(peer_ip, payload_bytes, decoy, sender_ip,
+                       bailout_record, verifier):
+    args = (peer_ip, payload_bytes, decoy, sender_ip, bailout_record, verifier)
+    try:
+        params = list(inspect.signature(_on_message_cb).parameters.values())
+        if any(p.kind == p.VAR_POSITIONAL for p in params):
+            n = len(args)
+        else:
+            n = sum(p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD) for p in params)
+    except (TypeError, ValueError):
+        n = len(args)
+    _on_message_cb(*args[:n])
+
+
 def _handle_tcp_connection(conn: socket.socket, peer_ip: str) -> None:
     try:
         conn.settimeout(10.0)
@@ -188,7 +246,14 @@ def _handle_tcp_connection(conn: socket.socket, peer_ip: str) -> None:
             payload_bytes = base64.b64decode(pkt["payload"])
             decoy = pkt.get("decoy", "")
             sender_ip = pkt.get("sender_ip", peer_ip)
-            _on_message_cb(peer_ip, payload_bytes, decoy, sender_ip)
+            bailout_record = pkt.get("bailout")
+            if not isinstance(bailout_record, dict):
+                bailout_record = None
+            verifier = pkt.get("verifier")
+            if not isinstance(verifier, dict):
+                verifier = None
+            _invoke_message_cb(peer_ip, payload_bytes, decoy, sender_ip,
+                               bailout_record, verifier)
 
         elif pkt_type == "notification" and _on_notification_cb:
             event = pkt.get("event", "")
@@ -225,8 +290,9 @@ if __name__ == "__main__":
     print(f"Hostname : {socket.gethostname()}")
     print()
 
-    def _msg_cb(ip, ct_bytes, decoy, sender_ip):
-        print(f"[MESSAGE] from {ip} | decoy='{decoy}' | ciphertext bytes={len(ct_bytes)}")
+    def _msg_cb(ip, ct_bytes, decoy, sender_ip, bailout_record):
+        print(f"[MESSAGE] from {ip} | decoy='{decoy}' | ciphertext bytes={len(ct_bytes)} "
+              f"| bailout={'yes' if bailout_record else 'no'}")
 
     def _notif_cb(event, sender_ip):
         print(f"[NOTIFICATION] event='{event}' from {sender_ip}")
